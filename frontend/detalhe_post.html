@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title id="postTitle">Detalhe da Postagem</title>
+    <link rel="stylesheet" href="./css/style.css">
+</head>
+<body>
+
+    <header>
+        <nav>
+            <a href="feed.html">Voltar ao Feed</a>
+            <button id="logoutBtn">Sair</button>
+        </nav>
+    </header>
+
+    <main class="container">
+        <div id="postDetalhe">
+            <h2>Carregando...</h2>
+        </div>
+        
+        <form id="edicaoForm" style="display: none;">
+            <h3>Editar Postagem</h3>
+            <label for="edit_titulo">Título:</label>
+            <input type="text" id="edit_titulo" required>
+
+            <label for="edit_corpo">Conteúdo:</label>
+            <textarea id="edit_corpo" rows="15" required></textarea>
+
+            <button type="submit">Salvar Edição</button>
+            <button type="button" id="cancelarEdicaoBtn">Cancelar</button>
+        </form>
+
+        <p id="mensagemStatus" class=""></p>
+    </main>
+
+    <script src="./js/api.js"></script>
+    <script src="./js/detalhe_post.js"></script>
+</body>
+</html>
