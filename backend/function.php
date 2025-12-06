@@ -1,232 +1,349 @@
-<?php
-// backend/function.php
+//FUNÇÕES GET/POST (busca e retorna algo):
 
-// Garante que o arquivo de conexão seja incluído
-include_once 'banco.php';
+// realizar a procura de usuário por email e retornar o id de usuário ou
+os dados de usuário
 
-// A variável $conn (conexão com o banco de dados) agora está disponível globalmente nas funções
-
-/**
- * =================================
- * FUNÇÕES CRUD - USER
- * =================================
- */
-
-// Busca um usuário pelo email (usado no Login)
-function getUserByEmail(string $email) {
-    global $conn;
-    $stmt = $conn->prepare("SELECT id, nome, sobrenome, email, senha, biografia, avatar_url FROM user WHERE email = ?");
-    $stmt->execute([$email]);
-    $user = $stmt->fetch(); // Retorna o array associativo (ou false se não encontrar)
-    return $user;
-}
-
-// Cria um novo usuário (usado no Cadastro)
-function createUser(array $dados) {
-    global $conn;
-    
-    // Verifica se o email já existe para evitar duplicidade
-    if (getUserByEmail($dados['email'])) {
-        return "Email já cadastrado.";
-    }
-
-    try {
-        // 1. Hashear a Senha (Segurança!)
-        $senhaHash = password_hash($dados['senha'], PASSWORD_DEFAULT);
-        $dataRegistro = date('Y-m-d H:i:s'); // Usando datetime para maior precisão, ajuste conforme seu DB
-
-        $sql = "INSERT INTO user (nome, sobrenome, senha, email, biografia, avatar_url, data_registro) 
-                VALUES (?, ?, ?, ?, ?, ?, ?)";
-        
-        $stmt = $conn->prepare($sql);
-        $stmt->execute([
-            $dados['nome'],
-            $dados['sobrenome'],
-            $senhaHash,
-            $dados['email'],
-            $dados['biografia'] ?? null,
-            $dados['avatar_url'] ?? null,
-            $dataRegistro
-        ]);
-
-        // Retorna o ID do usuário recém-criado
-        return $conn->lastInsertId(); 
-
-    } catch (\PDOException $e) {
-        // Logar o erro se necessário. Retorna uma mensagem de erro genérica.
-        return "Erro interno ao cadastrar: " . $e->getMessage();
-    }
+function getUserByEmail(string $email): ?array {
+    $pdo = getConnection();
+    $stmt = $pdo->prepare('SELECT * FROM "user" WHERE email = :email LIMIT 1;');
+    $stmt->bindValue(':email', $email, PDO::PARAM_STR);
+    $stmt->execute();
+    $user = $stmt->fetch();
+    return $user !== false ? $user : null;
 }
 
 
-/**
- * =================================
- * FUNÇÕES CRUD - POSTS
- * =================================
- */
 
-// Busca todas as postagens (usado no Feed)
-function getAllPosts(int $limit = 20, int $userIdLogado = null) {
-    global $conn;
+// realizar a procura de usuário por ID e retornar os dados de usuário
 
-    // A query faz um JOIN com a tabela 'user' para pegar o nome do autor
-    // e um LEFT JOIN com 'likes' para calcular a contagem total e verificar se o usuário logado curtiu.
-    $sql = "SELECT 
-                p.id, p.titulo, p.corpo, p.data_criacao, p.user_id,
-                u.nome AS nome_autor, 
-                COUNT(l.user_id) AS total_likes,
-                (SELECT COUNT(id) FROM likes WHERE post_id = p.id AND user_id = :user_id_logado_sub) AS curtido_por_usuario
-            FROM post p
-            JOIN user u ON p.user_id = u.id
-            LEFT JOIN likes l ON p.id = l.post_id
-            GROUP BY p.id
-            ORDER BY p.data_criacao DESC
-            LIMIT :limit";
+function getUserByID(int $userId): ?array {
+    $pdo = getConnection();
+    $stmt = $pdo->prepare('SELECT * FROM "user" WHERE id = :id LIMIT 1;');
+    $stmt->bindValue(':id', $userId, PDO::PARAM_INT);
+    $stmt->execute();
+    $user = $stmt->fetch();
+    return $user !== false ? $user : null;
+}
 
-    $stmt = $conn->prepare($sql);
+
+// buscar todas as postagens e retornar dentro do limite
+
+function getAllPosts(int $limit = 50): array {
+    if ($limit < 1) { $limit = 1; }
+    $pdo = getConnection();
+    $sql = <<<SQL
+        SELECT
+            p.*,
+            u.nome           AS autor_nome,
+            u.sobrenome  AS autor_sobrenome,
+            u.email      AS autor_email
+        FROM post p
+        JOIN "user" u ON u.id = p.user_id
+        ORDER BY datetime(p.data_criacao) DESC, p.id DESC
+        LIMIT :limit;
+    SQL;
+
+    $stmt = $pdo->prepare($sql);
     $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
-    // Bind do ID do usuário logado para a subquery (se for null, bind 0 para não falhar)
-    $stmt->bindValue(':user_id_logado_sub', $userIdLogado ?? 0, PDO::PARAM_INT); 
-    
     $stmt->execute();
     return $stmt->fetchAll();
 }
 
-// Busca uma postagem por ID
-function getPostByID(int $postId, int $userIdLogado = null) {
-    global $conn;
 
-    $sql = "SELECT 
-                p.id, p.titulo, p.corpo, p.data_criacao, p.user_id,
-                u.nome AS nome_autor, 
-                COUNT(l.user_id) AS total_likes,
-                (SELECT COUNT(id) FROM likes WHERE post_id = :post_id_sub AND user_id = :user_id_logado_sub) AS curtido_por_usuario
+// realizar a procura por uma postagem específica (postid) e retornar os
+dados desta postagem
+
+function getPostByID(int $postId): ?array {
+    $pdo = getConnection();
+    $sql = <<<SQL
+            SELECT
+                   p.*,
+                   u.nome           AS autor_nome,
+                   u.sobrenome  AS autor_sobrenome,
+                   u.email           AS autor_email
             FROM post p
-            JOIN user u ON p.user_id = u.id
-            LEFT JOIN likes l ON p.id = l.post_id
-            WHERE p.id = :post_id_main
-            GROUP BY p.id";
+            JOIN "user" u ON u.id = p.user_id
+            WHERE p.id = :postID;
+    SQL;
 
-    $stmt = $conn->prepare($sql);
-    $stmt->bindValue(':post_id_main', $postId, PDO::PARAM_INT);
-    $stmt->bindValue(':post_id_sub', $postId, PDO::PARAM_INT);
-    $stmt->bindValue(':user_id_logado_sub', $userIdLogado ?? 0, PDO::PARAM_INT); 
+    $stmt = $pdo->prepare($sql);
+    $stmt->bindValue(':postID', $postID, PDO::PARAM_INT);
+    $stmt->execute();
+    $post = $stmt->fetch();
+
+    return $post !== false ? $post : null;
+}
+
+// buscar todas as postagens realizadas por um usuário e retornar os
+dados da postagem
+
+function getAllPostByUser(int $userId): array {
+    $pdo = getConnection();
+    $sql = <<<SQL
+        SELECT
+                   p.*,
+                   u.nome          AS autor_nome,
+                   u.sobrenome AS autor_sobrenome
+        FROM post p
+        JOIN "user" u ON u.id = p.user_id
+        WHERE p.user_id = :user_id
+        ORDER BY datetime(p.data_criacao) DESC;
+    SQL;
+    
+    $stmt = $pdo->prepare($sql);
+    $stmt->bindValue(':user_id', $userId, PDO::PARAM_INT);
+    $stmt->execute();
+
+    return $stmt->fetchAll();
+}
+
+// realizar uma busca por similaridade da string com o 'corpo' das postagens
+// retornar as postagens que se enquadrem
+
+function getPostBySearchContent(string $searchTerm): array {
+    $pdo = getConnection();
+    // Adiciona os curingas (%) para buscar em qualquer parte do texto
+    $likeTerm = '%' . $searchTerm . '%';
+    
+    $sql = 'SELECT * FROM post WHERE corpo LIKE :search ORDER BY data_criacao DESC;';
+    
+    $stmt = $pdo->prepare($sql);
+    $stmt->bindValue(':search', $likeTerm, PDO::PARAM_STR);
+    $stmt->execute();
+
+    return $stmt->fetchAll();
+}
+
+
+// realizar uma busca por similaridade da string com o 'título' das postagens
+// retornar as postagens que se enquadrem
+
+function getPostBySearchTitle(string $searchTerm): array {
+    $pdo = getConnection();
+    $likeTerm = '%' . $searchTerm . '%';
+
+    $sql = 'SELECT * FROM post WHERE titulo LIKE :search ORDER BY data_criacao DESC;';
+    
+    $stmt = $pdo->prepare($sql);
+    $stmt->bindValue(':search', $likeTerm, PDO::PARAM_STR);
+    $stmt->execute();
+
+    return $stmt->fetchAll();
+}
+
+// procurar as postagens curtidas pelo usuário
+
+function getPostBySearchTitle(string $searchTerm): array {
+    $pdo = getConnection();
+    $likeTerm = '%' . $searchTerm . '%';
+
+    $sql = 'SELECT * FROM post WHERE titulo LIKE :search ORDER BY data_criacao DESC;';
+    
+    $stmt = $pdo->prepare($sql);
+    $stmt->bindValue(':search', $likeTerm, PDO::PARAM_STR);
+    $stmt->execute();
+
+    return $stmt->fetchAll();
+}
+
+// buscar e contar os likes de uma determinada postagem, retornar a contagem
+
+function getPostLikes(int $postId): int {
+    $pdo = getConnection();
+    $sql = 'SELECT COUNT(*) FROM likes WHERE id_post = :post_id;';
+    
+    $stmt = $pdo->prepare($sql);
+    $stmt->bindValue(':post_id', $postId, PDO::PARAM_INT);
+    $stmt->execute();
+
+    // fetchColumn() é ideal para buscar um único valor de uma coluna
+    return (int) $stmt->fetchColumn();
+}
+
+
+
+//FUNÇÕES CREATE/UPDATE (atualiza ou cria registro no banco de dados):
+
+
+
+// Insere os dados de usuário no banco criando um novo usuário
+
+function createUser(array $userData): int {
+    $pdo = getConnection();
+    $sql = <<<SQL
+        INSERT INTO "user" (nome, sobrenome, senha, email, biografia, avatar_url)
+        VALUES (:nome, :sobrenome, :senha, :email, :biografia, :avatar_url);
+    SQL;
+    
+    $stmt = $pdo->prepare($sql);
+    
+    $hashedPassword = password_hash($userData['senha'], PASSWORD_DEFAULT);
+
+    $stmt->bindValue(':nome', $userData['nome'], PDO::PARAM_STR);
+    $stmt->bindValue(':sobrenome', $userData['sobrenome'], PDO::PARAM_STR);
+    $stmt->bindValue(':senha', $hashedPassword, PDO::PARAM_STR);
+    $stmt->bindValue(':email', $userData['email'], PDO::PARAM_STR);
+    $stmt->bindValue(':biografia', $userData['biografia'] ?? null, PDO::PARAM_STR);
+    $stmt->bindValue(':avatar_url', $userData['avatar_url'] ?? null, PDO::PARAM_STR);
     
     $stmt->execute();
-    return $stmt->fetch();
-}
-
-// Cria um novo post
-function createPost(array $data) {
-    global $conn;
-    try {
-        $sql = "INSERT INTO post (titulo, corpo, user_id, data_criacao) VALUES (?, ?, ?, NOW())";
-        $stmt = $conn->prepare($sql);
-        $stmt->execute([
-            $data['titulo'],
-            $data['corpo'],
-            $data['user_id']
-        ]);
-        return $conn->lastInsertId();
-    } catch (\PDOException $e) {
-        return false;
-    }
-}
-
-// Atualiza um post (verifica se o user_id é o autor)
-function updatePost(array $data) {
-    global $conn;
     
-    // 1. Verifica se o usuário é o autor do post
-    $post = getPostByID($data['id']);
-    if (!$post || (int)$post['user_id'] !== (int)$data['user_id']) {
-        return false; // Falha na autorização
-    }
-
-    try {
-        $sql = "UPDATE post SET titulo = ?, corpo = ? WHERE id = ?";
-        $stmt = $conn->prepare($sql);
-        $stmt->execute([$data['titulo'], $data['corpo'], $data['id']]);
-        return $stmt->rowCount() > 0;
-    } catch (\PDOException $e) {
-        return false;
-    }
+    // Retorna o ID do último usuário inserido
+    return (int) $pdo->lastInsertId();
 }
 
-// Deleta um post (verifica se o user_id é o autor)
-function deletePost(int $postId, int $userId) {
-    global $conn;
 
-    // 1. Verifica se o usuário é o autor do post
-    $post = getPostByID($postId);
-    if (!$post || (int)$post['user_id'] !== (int)$userId) {
-        return false; // Falha na autorização
-    }
 
-    try {
-        // O MySQL/MariaDB deve estar configurado com ON DELETE CASCADE para apagar os likes associados
-        $sql = "DELETE FROM post WHERE id = ?";
-        $stmt = $conn->prepare($sql);
-        $stmt->execute([$postId]);
-        return $stmt->rowCount() > 0;
-    } catch (\PDOException $e) {
-        return false;
-    }
+// atualiza informações do usuário
+
+function updateUser(int $userId, array $userData): bool {
+    $pdo = getConnection();
+    $sql = <<<SQL
+        UPDATE "user" SET
+            nome = :nome,
+            sobrenome = :sobrenome,
+            email = :email,
+            biografia = :biografia,
+            avatar_url = :avatar_url
+        WHERE id = :id;
+    SQL;
+
+    $stmt = $pdo->prepare($sql);
+
+    $stmt->bindValue(':nome', $userData['nome'], PDO::PARAM_STR);
+    $stmt->bindValue(':sobrenome', $userData['sobrenome'], PDO::PARAM_STR);
+    $stmt->bindValue(':email', $userData['email'], PDO::PARAM_STR);
+    $stmt->bindValue(':biografia', $userData['biografia'] ?? null, PDO::PARAM_STR);
+    $stmt->bindValue(':avatar_url', $userData['avatar_url'] ?? null, PDO::PARAM_STR);
+    $stmt->bindValue(':id', $userId, PDO::PARAM_INT);
+
+    return $stmt->execute();
 }
 
-/**
- * =================================
- * FUNÇÕES LIKES
- * =================================
- */
 
-// Função de toggle (se o like existe, remove; se não, adiciona)
-function updateLikes(int $postId, int $userId) {
-    global $conn;
 
-    // 1. Verifica se o like já existe
-    $sqlCheck = "SELECT id FROM likes WHERE post_id = ? AND user_id = ?";
-    $stmtCheck = $conn->prepare($sqlCheck);
-    $stmtCheck->execute([$postId, $userId]);
-    $likeExistente = $stmtCheck->fetch();
+// apagar um usuário do banco
+
+function deleteUser(int $userId): bool {
+    $pdo = getConnection();
+    $sql = 'DELETE FROM "user" WHERE id = :id;';
+    $stmt = $pdo->prepare($sql);
+    $stmt->bindValue(':id', $userId, PDO::PARAM_INT);
+    return $stmt->execute();
+}
+
+
+
+// Insere um novo post com vínculo ao usuário
+
+function createPost(array $postData, int $userId): int {
+    $pdo = getConnection();
+    $sql = 'INSERT INTO post (titulo, corpo, user_id) VALUES (:titulo, :corpo, :user_id);';
+    $stmt = $pdo->prepare($sql);
+    
+    $stmt->bindValue(':titulo', $postData['titulo'], PDO::PARAM_STR);
+    $stmt->bindValue(':corpo', $postData['corpo'], PDO::PARAM_STR);
+    $stmt->bindValue(':user_id', $userId, PDO::PARAM_INT);
+    
+    $stmt->execute();
+    
+    return (int) $pdo->lastInsertId();
+}
+
+
+
+// atualiza os dados de um post
+
+function updatePost(array $postData, int $postId, int $userId): bool {
+    $pdo = getConnection();
+    $sql = <<<SQL
+        UPDATE post SET
+            titulo = :titulo,
+            corpo = :corpo
+        WHERE id = :id AND user_id = :user_id;
+    SQL;
+
+    $stmt = $pdo->prepare($sql);
+
+    $stmt->bindValue(':titulo', $postData['titulo'], PDO::PARAM_STR);
+    $stmt->bindValue(':corpo', $postData['corpo'], PDO::PARAM_STR);
+    $stmt->bindValue(':id', $postId, PDO::PARAM_INT);
+    $stmt->bindValue(':user_id', $userId, PDO::PARAM_INT);
+
+    return $stmt->execute();
+}
+
+
+// apagar um post do banco
+
+function deletePost(int $postId): bool {
+    $pdo = getConnection();
+    $sql = 'DELETE FROM post WHERE id = :id;';
+    $stmt = $pdo->prepare($sql);
+    $stmt->bindValue(':id', $postId, PDO::PARAM_INT);
+    return $stmt->execute();
+}
+
+// função dois em 1, se não houver um like adiciona, se houver o like
+remove (toggle)
+// retorna true ou false (conforme a execução foi bem sucedida)
+// ou cria um função para cada e lida com a existência de like no
+programa
+
+function updateLikes(int $postId, int $userId): ?bool {
+    $pdo = getConnection();
+
+
+    $pdo->beginTransaction();
 
     try {
-        $conn->beginTransaction(); // Inicia uma transação para garantir atomicidade
+        // 1. Verifica se o like já existe
+        $sqlCheck = 'SELECT COUNT(*) FROM likes WHERE id_user = :user_id AND id_post = :post_id;';
+        $stmtCheck = $pdo->prepare($sqlCheck);
+        $stmtCheck->bindValue(':user_id', $userId, PDO::PARAM_INT);
+        $stmtCheck->bindValue(':post_id', $postId, PDO::PARAM_INT);
+        $stmtCheck->execute();
+        $likeExists = $stmtCheck->fetchColumn() > 0;
 
-        if ($likeExistente) {
-            // 2. Se existe, remove (Descurtir)
-            $sqlAction = "DELETE FROM likes WHERE id = ?";
-            $stmtAction = $conn->prepare($sqlAction);
-            $stmtAction->execute([$likeExistente['id']]);
-            $acao = 'removido';
+        if ($likeExists) {
+            // 2a. Se existe, remove (unlike)
+            $sqlToggle = 'DELETE FROM likes WHERE id_user = :user_id AND id_post = :post_id;';
+            $result = false; // O like foi removido
         } else {
-            // 3. Se não existe, adiciona (Curtir)
-            $sqlAction = "INSERT INTO likes (post_id, user_id) VALUES (?, ?)";
-            $stmtAction = $conn->prepare($sqlAction);
-            $stmtAction->execute([$postId, $userId]);
-            $acao = 'adicionado';
+            // 2b. Se não existe, adiciona (like)
+            $sqlToggle = 'INSERT INTO likes (id_user, id_post) VALUES (:user_id, :post_id);';
+            $result = true; // O like foi adicionado
         }
         
-        // 4. Recalcula a contagem total de likes
-        $sqlCount = "SELECT COUNT(id) FROM likes WHERE post_id = ?";
-        $stmtCount = $conn->prepare($sqlCount);
-        $stmtCount->execute([$postId]);
-        $totalLikes = $stmtCount->fetchColumn();
+        $stmtToggle = $pdo->prepare($sqlToggle);
+        $stmtToggle->bindValue(':user_id', $userId, PDO::PARAM_INT);
+        $stmtToggle->bindValue(':post_id', $postId, PDO::PARAM_INT);
+        $stmtToggle->execute();
 
-        $conn->commit(); // Confirma as alterações
+        // Se tudo deu certo, confirma as alterações
+        $pdo->commit();
 
-        // 5. Retorna o status da operação
-        return [
-            'acao' => $acao,
-            'total_likes' => (int)$totalLikes
-        ];
+        return $result;
 
-    } catch (\PDOException $e) {
-        $conn->rollBack(); // Em caso de erro, desfaz as alterações
-        return ['message' => "Erro no banco de dados: " . $e->getMessage()];
+    } catch (PDOException $e) {
+        // Se algo deu errado, desfaz tudo
+        $pdo->rollBack();
+        // Opcional: registrar o erro $e->getMessage()
+        return null; // Indica que houve um erro na operação
     }
 }
 
-// ... Outras funções (getPostByUser, getPostBySearch, etc.) podem ser implementadas aqui se necessário.
 
-?>
+
+
+
+
+
+
+
+
+
+
+
+
+
