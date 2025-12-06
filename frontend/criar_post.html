@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blog Dev Web II - Nova Postagem</title>
+    <link rel="stylesheet" href="./css/style.css">
+</head>
+<body>
+
+    <header>
+        <h1>Criar Nova Postagem</h1>
+        <nav>
+            <a href="feed.html">Voltar ao Feed</a>
+            <button id="logoutBtn">Sair</button>
+        </nav>
+    </header>
+
+    <main class="container">
+        <form id="postForm">
+            <label for="titulo">Título da Postagem:</label>
+            <input type="text" id="titulo" name="titulo" required maxlength="255">
+
+            <label for="corpo">Conteúdo:</label>
+            <textarea id="corpo" name="corpo" rows="15" required></textarea>
+
+            <button type="submit">Publicar Postagem</button>
+        </form>
+
+        <p id="mensagemStatus" class=""></p>
+    </main>
+
+    <script src="./js/api.js"></script>
+    <script src="./js/criar_post.js"></script>
+</body>
+</html>
